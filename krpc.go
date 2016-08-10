@@ -113,10 +113,11 @@ func (krpc *KRPC) Response(msg *KRPCMessage) {
 
 //AnnounceData define data to storage
 type AnnounceData struct {
-	Infohash    string
-	IP          net.IP
-	Port        int
-	ImpliedPort int
+	Infohash       string
+	IP             net.IP
+	Port           int
+	ImpliedPort    int
+	IsAnnouncePeer bool
 }
 
 //Query message
@@ -178,7 +179,9 @@ func (krpc *KRPC) Query(msg *KRPCMessage) {
 				result.IP = msg.Addr.IP
 				result.Port = port
 				result.ImpliedPort = int(impliedPort)
-				// krpc.Dht.outChan <- result
+				result.IsAnnouncePeer = true
+				krpc.Dht.outChan <- result
+
 				var data []byte
 				if id, ok := query.A["id"].(string); ok {
 					newID := Neightor(id, krpc.Dht.node.ID.String())
