@@ -59,9 +59,12 @@ func (nw *Network) Listening() {
 
 //Send data
 func (nw *Network) Send(m []byte, addr *net.UDPAddr) error {
-	_, err := nw.Conn.WriteToUDP(m, addr)
-	if err != nil {
-		logger(err)
+	if addr != nil && addr.Port != 0 {
+		_, err := nw.Conn.WriteToUDP(m, addr)
+		if err != nil {
+			logger(err)
+		}
+		return err
 	}
-	return err
+	return nil
 }
