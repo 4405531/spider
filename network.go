@@ -18,9 +18,8 @@ type network struct {
 }
 
 func newNetwork(dht *dht, address string) *network {
-	nw := &network{dht: dht,
-		//默认限速：每个节点每秒最多处理100个请求
-		rateLimit: ratelimit.NewBucketWithRate(float64(RateLimit), RateLimit)}
+	//默认限速：每个节点每秒最多处理100个请求
+	nw := &network{dht: dht, rateLimit: ratelimit.NewBucketWithRate(float64(RateLimit), RateLimit)}
 	nw.init(address)
 	return nw
 }
