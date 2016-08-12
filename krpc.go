@@ -18,37 +18,37 @@ func (p *krpc) decode(data []byte, val map[string]interface{}, raddr *net.UDPAdd
 	var ok bool
 	message := new(krpcMessage)
 
-	message.T, ok = val["t"].(string) //请求tid
+	message.t, ok = val["t"].(string) //请求tid
 	if !ok {
 		return nil
 	}
 
-	message.Y, ok = val["y"].(string) //请求类型
+	message.y, ok = val["y"].(string) //请求类型
 	if !ok {
 		return nil
 	}
 
-	message.Addr = raddr
+	message.addr = raddr
 
-	switch message.Y {
+	switch message.y {
 	case "q":
 		query := new(query)
 		if q, ok := val["q"].(string); ok {
-			query.Y = q
+			query.y = q
 		} else {
 			return nil
 		}
 		if a, ok := val["a"].(map[string]interface{}); ok {
-			query.A = a
-			message.Addion = query
+			query.a = a
+			message.addion = query
 		} else {
 			return nil
 		}
 	case "r":
 		res := new(response)
 		if r, ok := val["r"].(map[string]interface{}); ok {
-			res.R = r
-			message.Addion = res
+			res.r = r
+			message.addion = res
 		} else {
 			return nil
 		}
@@ -56,7 +56,7 @@ func (p *krpc) decode(data []byte, val map[string]interface{}, raddr *net.UDPAdd
 		return nil
 	}
 
-	switch message.Y {
+	switch message.y {
 	case "q":
 		p.query(message)
 		break
@@ -72,8 +72,8 @@ func (p *krpc) response(msg *krpcMessage) {
 	countFindResponse++
 	//当table还有空余位置再解析，避免内存浪费
 	if len(p.dht.table.nodes) <= TableMaxSize && len(finder) <= FinderMaxSize {
-		if response, ok := msg.Addion.(*response); ok {
-			if nodestr, ok := response.R["nodes"].(string); ok {
+		if response, ok := msg.addion.(*response); ok {
+			if nodestr, ok := response.r["nodes"].(string); ok {
 				nodes := parseBytesStream([]byte(nodestr))
 				for _, node := range nodes {
 					if node.port > 0 && node.port <= (1<<16) {
@@ -95,15 +95,15 @@ type Infohash struct {
 }
 
 func (p *krpc) query(msg *krpcMessage) {
-	if query, ok := msg.Addion.(*query); ok {
-		if query.Y == "get_peers" {
+	if query, ok := msg.addion.(*query); ok {
+		if query.y == "get_peers" {
 			countGetPeers++
-			if infohash, ok := query.A["info_hash"].(string); ok {
-				if len(infohash) != 20 || len(msg.T) == 0 {
+			if infohash, ok := query.a["info_hash"].(string); ok {
+				if len(infohash) != 20 || len(msg.t) == 0 {
 					return
 				}
 
-				if fromID, ok := query.A["id"].(string); !ok {
+				if fromID, ok := query.a["id"].(string); !ok {
 					return
 				} else if len(fromID) != 20 {
 					return
@@ -111,16 +111,16 @@ func (p *krpc) query(msg *krpcMessage) {
 
 				p.dht.out <- Infohash{
 					Infohash: ID(infohash).string(),
-					IP:       msg.Addr.IP}
+					IP:       msg.addr.IP}
 
 				nodes := convertByteStream(p.dht.table.fnodes)
-				data, _ := p.encodingNodeResult(msg.T, "asdf13e", nodes)
-				go p.dht.network.send(data, msg.Addr)
+				data, _ := p.encodingNodeResult(msg.t, "asdf13e", nodes)
+				go p.dht.network.send(data, msg.addr)
 			}
 		}
-		if query.Y == "announce_peer" {
-			if infohash, ok := query.A["info_hash"].(string); ok {
-				if token, ok := query.A["token"].(string); !ok {
+		if query.y == "announce_peer" {
+			if infohash, ok := query.a["info_hash"].(string); ok {
+				if token, ok := query.a["token"].(string); !ok {
 					return
 				} else if token != "asdf13e" {
 					return
@@ -128,13 +128,13 @@ func (p *krpc) query(msg *krpcMessage) {
 
 				var port int
 				var impliedPort int64
-				impliedPort, ok = query.A["implied_port"].(int64)
+				impliedPort, ok = query.a["implied_port"].(int64)
 				if ok {
 					if impliedPort != 0 {
-						port = msg.Addr.Port
+						port = msg.addr.Port
 					}
 				} else {
-					pport, ok := query.A["port"].(int64)
+					pport, ok := query.a["port"].(int64)
 					if ok {
 						port = int(pport)
 					}
@@ -144,42 +144,42 @@ func (p *krpc) query(msg *krpcMessage) {
 
 				p.dht.out <- Infohash{
 					Infohash:       ID(infohash).string(),
-					IP:             msg.Addr.IP,
+					IP:             msg.addr.IP,
 					Port:           port,
 					ImpliedPort:    int(impliedPort),
 					IsAnnouncePeer: true}
 
 				var data []byte
-				if id, ok := query.A["id"].(string); ok {
+				if id, ok := query.a["id"].(string); ok {
 					newID := neightor(id, p.dht.node.id.string())
-					data, _ = p.encodingCommonResult(msg.T, newID)
+					data, _ = p.encodingCommonResult(msg.t, newID)
 				} else {
-					data, _ = p.encodingCommonResult(msg.T, p.dht.node.id.string())
+					data, _ = p.encodingCommonResult(msg.t, p.dht.node.id.string())
 				}
-				go p.dht.network.send(data, msg.Addr)
+				go p.dht.network.send(data, msg.addr)
 			}
 		}
 
-		if query.Y == "ping" {
+		if query.y == "ping" {
 			var data []byte
-			if id, ok := query.A["id"].(string); ok && len(id) == 20 {
+			if id, ok := query.a["id"].(string); ok && len(id) == 20 {
 				newID := neightor(id, p.dht.node.id.string())
-				data, _ = p.encodingCommonResult(msg.T, newID)
+				data, _ = p.encodingCommonResult(msg.t, newID)
 			} else {
-				data, _ = p.encodingCommonResult(msg.T, p.dht.node.id.string())
+				data, _ = p.encodingCommonResult(msg.t, p.dht.node.id.string())
 			}
 			countPing++
-			go p.dht.network.send(data, msg.Addr)
+			go p.dht.network.send(data, msg.addr)
 		}
 
-		if query.Y == "find_node" {
-			if msg.T == "" {
+		if query.y == "find_node" {
+			if msg.t == "" {
 				return
 			}
 			countFindNode++
 			nodes := convertByteStream(p.dht.table.fnodes)
-			data, _ := p.encodingNodeResult(msg.T, "", nodes)
-			go p.dht.network.send([]byte(data), msg.Addr)
+			data, _ := p.encodingNodeResult(msg.t, "", nodes)
+			go p.dht.network.send([]byte(data), msg.addr)
 		}
 	}
 }
@@ -221,19 +221,19 @@ func parseBytesStream(data []byte) []*node {
 
 //KRPCMessage define
 type krpcMessage struct {
-	T      string
-	Y      string
-	Addion interface{}
-	Addr   *net.UDPAddr
+	t      string
+	y      string
+	addion interface{}
+	addr   *net.UDPAddr
 }
 
 type query struct {
-	Y string
-	A map[string]interface{}
+	y string
+	a map[string]interface{}
 }
 
 type response struct {
-	R map[string]interface{}
+	r map[string]interface{}
 }
 
 func (p *krpc) encodingNodeResult(tid string, token string, nodes []byte) ([]byte, error) {
