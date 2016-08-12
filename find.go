@@ -9,24 +9,20 @@ import (
 	"github.com/zeebo/bencode"
 )
 
-//BOOTSTRAP define
-var BOOTSTRAP = []string{
-	"router.bittorrent.com:6881",
-	"router.utorrent.com:6881",
-	"dht.transmissionbt.com:6881",
-}
+//define entry
+var (
+	Bootstrap       = []string{"router.bittorrent.com:6881", "router.utorrent.com:6881", "dht.transmissionbt.com:6881"}
+	FinderDelayTime = time.Millisecond * 50
+)
 
-var findDelayTime = time.Millisecond * 50
-
-//FindNode find node
-func (dhtNode *DhtNode) FindNode(v map[string]interface{}, args map[string]string, node *KNode) {
+func (p *dht) findNode(v map[string]interface{}, args map[string]string, node *node) {
 	countFindRequest++
 
 	var id ID
-	if node.ID != nil {
-		id = node.ID.Neighbor(dhtNode.node.ID)
+	if node.id != nil {
+		id = node.id.neighbor(p.node.id)
 	} else {
-		id = dhtNode.node.ID
+		id = p.node.id
 	}
 
 	v["t"] = fmt.Sprintf("%d", rand.Intn(100))
@@ -42,41 +38,37 @@ func (dhtNode *DhtNode) FindNode(v map[string]interface{}, args map[string]strin
 		return
 	}
 
-	raddr := new(net.UDPAddr)
-	raddr.IP = node.IP
-	raddr.Port = node.Port
-	err = dhtNode.network.Send(data, raddr)
+	err = p.network.send(data, &net.UDPAddr{IP: node.ip, Port: node.port})
 	if err != nil {
 		logger(err)
 		return
 	}
 }
 
-//NodeFinder node finder
-func (dhtNode *DhtNode) NodeFinder() {
-	if len(dhtNode.table.Nodes) == 0 {
+func (p *dht) find() {
+	if len(p.table.nodes) == 0 {
 		val := make(map[string]interface{})
 		args := make(map[string]string)
-		for _, host := range BOOTSTRAP {
+		for _, host := range Bootstrap {
 			raddr, err := net.ResolveUDPAddr("udp", host)
 			if err != nil {
 				logger("Resolve DNS error, %s\n", err)
 				return
 			}
-			node := new(KNode)
-			node.Port = raddr.Port
-			node.IP = raddr.IP
-			node.ID = nil
-			dhtNode.FindNode(val, args, node)
+			node := new(node)
+			node.port = raddr.Port
+			node.ip = raddr.IP
+			node.id = nil
+			p.findNode(val, args, node)
 		}
 	}
 	val := make(map[string]interface{})
 	args := make(map[string]string)
 	for {
-		node := dhtNode.table.Pop()
+		node := p.table.pop()
 		if node != nil {
-			dhtNode.FindNode(val, args, node)
-			time.Sleep(findDelayTime)
+			p.findNode(val, args, node)
+			time.Sleep(FinderDelayTime)
 			continue
 		}
 		time.Sleep(time.Second)

@@ -2,6 +2,7 @@ package spider
 
 import (
 	"net"
+	"os"
 	"time"
 
 	"github.com/juju/ratelimit"
@@ -10,57 +11,54 @@ import (
 //RateLimit limit speed
 var RateLimit int64 = 100
 
-//Network define
-type Network struct {
-	Dht       *DhtNode
-	Conn      *net.UDPConn
-	RateLimit *ratelimit.Bucket
+type network struct {
+	dht       *dht
+	conn      *net.UDPConn
+	rateLimit *ratelimit.Bucket
 }
 
-//NewNetwork create network
-func NewNetwork(dhtNode *DhtNode, address string) *Network {
-	nw := new(Network)
-	nw.Dht = dhtNode
-	nw.RateLimit = ratelimit.NewBucketWithRate(float64(RateLimit), RateLimit) //默认限速：每个节点每秒最多处理100个请求
-	nw.Init(address)
+func newNetwork(dht *dht, address string) *network {
+	nw := &network{dht: dht,
+		//默认限速：每个节点每秒最多处理100个请求
+		rateLimit: ratelimit.NewBucketWithRate(float64(RateLimit), RateLimit)}
+	nw.init(address)
 	return nw
 }
 
-//Init it
-func (nw *Network) Init(address string) {
+func (p *network) init(address string) {
 	addr := new(net.UDPAddr)
 	addr, err := net.ResolveUDPAddr("udp", address)
 	if err != nil {
-		panic(err)
+		logger(err)
+		os.Exit(1)
 	}
-	nw.Conn, err = net.ListenUDP("udp", addr)
+	p.conn, err = net.ListenUDP("udp", addr)
 	if err != nil {
-		panic(err)
+		logger(err)
+		os.Exit(1)
 	}
 
-	laddr := nw.Conn.LocalAddr().(*net.UDPAddr)
-	nw.Dht.node.IP = laddr.IP
-	nw.Dht.node.Port = laddr.Port
+	laddr := p.conn.LocalAddr().(*net.UDPAddr)
+	p.dht.node.ip = laddr.IP
+	p.dht.node.port = laddr.Port
 }
 
-//Listening on
-func (nw *Network) Listening() {
+func (p *network) listen() {
 	val := make(map[string]interface{})
 	buf := make([]byte, 1024)
 	for {
-		time.Sleep(nw.RateLimit.Take(1))
-		n, raddr, err := nw.Conn.ReadFromUDP(buf)
+		time.Sleep(p.rateLimit.Take(1))
+		n, raddr, err := p.conn.ReadFromUDP(buf)
 		if err != nil {
 			continue
 		}
-		nw.Dht.krpc.Decode(buf[:n], val, raddr)
+		p.dht.krpc.decode(buf[:n], val, raddr)
 	}
 }
 
-//Send data
-func (nw *Network) Send(m []byte, addr *net.UDPAddr) error {
+func (p *network) send(m []byte, addr *net.UDPAddr) error {
 	if addr != nil && addr.Port != 0 {
-		_, err := nw.Conn.WriteToUDP(m, addr)
+		_, err := p.conn.WriteToUDP(m, addr)
 		if err != nil {
 			logger(err)
 		}

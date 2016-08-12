@@ -5,50 +5,48 @@ import (
 	"sync"
 )
 
-//define const
+//define size
 const (
-	TableSize    = 1024
-	HasFoundSize = 100000
+	TableMaxSize  = 1024
+	FinderMaxSize = 100 * 1000
 )
 
-var hasFound = make(map[string]bool, HasFoundSize)
-var mutex sync.Mutex
+var (
+	finder = make(map[string]bool, FinderMaxSize)
+	mutex  sync.Mutex
+)
 
-//KNode define
-type KNode struct {
-	ID   ID
-	IP   net.IP
-	Port int
+type node struct {
+	id   ID
+	ip   net.IP
+	port int
 }
 
-//KTable define table
-type KTable struct {
-	Nodes []*KNode
+type table struct {
+	nodes []*node
 	cap   int64
 
 	//用于响应find_node请求
-	Snodes []*KNode
+	fnodes []*node
 }
 
-//Put node to table
-func (table *KTable) Put(node *KNode) {
-	ids := string([]byte(node.ID))
+func (p *table) put(node *node) {
+	ids := string([]byte(node.id))
 	mutex.Lock()
 	defer mutex.Unlock()
-	if _, ok := hasFound[ids]; !ok {
-		table.Nodes = append(table.Nodes, node)
-		hasFound[ids] = true
+	if _, ok := finder[ids]; !ok {
+		p.nodes = append(p.nodes, node)
+		finder[ids] = true
 	}
-	if len(table.Snodes) < 8 {
-		table.Snodes = append(table.Snodes, node)
+	if len(p.fnodes) < 8 {
+		p.fnodes = append(p.fnodes, node)
 	}
 }
 
-//Pop node
-func (table *KTable) Pop() *KNode {
-	if len(table.Nodes) > 0 {
-		n := table.Nodes[0]
-		table.Nodes = table.Nodes[1:]
+func (p *table) pop() *node {
+	if len(p.nodes) > 0 {
+		n := p.nodes[0]
+		p.nodes = p.nodes[1:]
 		return n
 	}
 	return nil

@@ -12,22 +12,15 @@ import (
 //ID define
 type ID []byte
 
-func (id ID) String() string {
+func (id ID) string() string {
 	return hex.EncodeToString(id)
 }
 
-//Int get int
-func (id ID) Int() *big.Int {
-	return big.NewInt(0).SetBytes(id)
-}
-
-//Neighbor get neighbor
-func (id ID) Neighbor(tableID ID) ID {
+func (id ID) neighbor(tableID ID) ID {
 	return append(id[:6], tableID[6:]...)
 }
 
-//Neightor get neighbor
-func Neightor(id, tableID string) string {
+func neightor(id, tableID string) string {
 	return id[:6] + tableID[6:]
 }
 

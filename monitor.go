@@ -13,28 +13,24 @@ var (
 	countPing         int64
 	countAnnounce     int64
 	countGetPeers     int64
-)
 
-var (
 	l = log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lshortfile)
 )
 
 //Monitor the network
 func Monitor() {
-	var (
-		preCountGetPeers int64
-	)
+	var preCountGetPeers int64
 	for {
-		if len(hasFound) >= HasFoundSize {
+		if len(finder) >= FinderMaxSize {
 			mutex.Lock()
-			for k := range hasFound {
-				delete(hasFound, k)
+			for k := range finder {
+				delete(finder, k)
 			}
-			hasFound = nil
-			hasFound = make(map[string]bool, HasFoundSize)
+			finder = nil
+			finder = make(map[string]bool, FinderMaxSize)
 			mutex.Unlock()
 		}
-		adjustFindFrequency(countGetPeers - preCountGetPeers)
+		adjustFinderSpeed(countGetPeers - preCountGetPeers)
 		preCountGetPeers = countGetPeers
 		logger("发出find_node请求数量", countFindRequest)
 		logger("收到find_node回复数量", countFindResponse)
@@ -47,12 +43,12 @@ func Monitor() {
 	}
 }
 
-func adjustFindFrequency(count int64) {
+func adjustFinderSpeed(count int64) {
 	//阶梯调整频率
 	//每分钟getpeer增加一万个，find sleep时间增加100ms
 	delay := count / 10000
 	if delay > 1 {
-		findDelayTime = time.Duration(50*delay) * time.Millisecond
+		FinderDelayTime = time.Duration(50*delay) * time.Millisecond
 	}
 }
 

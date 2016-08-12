@@ -2,46 +2,21 @@ package spider
 
 import (
 	"bytes"
-	"github.com/zeebo/bencode"
-	"math"
 	"net"
-	"sync/atomic"
+
+	"github.com/zeebo/bencode"
 )
 
-type action func(arg map[string]interface{}, raddr *net.UDPAddr)
+type krpc struct{ dht *dht }
 
-//KRPC define
-type KRPC struct {
-	Dht   *DhtNode
-	Types map[string]action
-	tid   uint32
-}
+func newKrpc(dht *dht) *krpc { return &krpc{dht: dht} }
 
-//NewKRPC create krpc
-func NewKRPC(dhtNode *DhtNode) *KRPC {
-	krpc := new(KRPC)
-	krpc.Dht = dhtNode
-
-	return krpc
-}
-
-//GenTID get id
-func (krpc *KRPC) GenTID() uint32 {
-	return krpc.autoID() % math.MaxUint16
-}
-
-func (krpc *KRPC) autoID() uint32 {
-	return atomic.AddUint32(&krpc.tid, 1)
-}
-
-//Decode message
-func (krpc *KRPC) Decode(data []byte, val map[string]interface{}, raddr *net.UDPAddr) error {
+func (p *krpc) decode(data []byte, val map[string]interface{}, raddr *net.UDPAddr) error {
 	if err := bencode.DecodeBytes(data, &val); err != nil {
 		return err
 	}
-	// logger(val)
 	var ok bool
-	message := new(KRPCMessage)
+	message := new(krpcMessage)
 
 	message.T, ok = val["t"].(string) //请求tid
 	if !ok {
@@ -57,7 +32,7 @@ func (krpc *KRPC) Decode(data []byte, val map[string]interface{}, raddr *net.UDP
 
 	switch message.Y {
 	case "q":
-		query := new(Query)
+		query := new(query)
 		if q, ok := val["q"].(string); ok {
 			query.Y = q
 		} else {
@@ -70,7 +45,7 @@ func (krpc *KRPC) Decode(data []byte, val map[string]interface{}, raddr *net.UDP
 			return nil
 		}
 	case "r":
-		res := new(Response)
+		res := new(response)
 		if r, ok := val["r"].(map[string]interface{}); ok {
 			res.R = r
 			message.Addion = res
@@ -83,27 +58,26 @@ func (krpc *KRPC) Decode(data []byte, val map[string]interface{}, raddr *net.UDP
 
 	switch message.Y {
 	case "q":
-		krpc.Query(message)
+		p.query(message)
 		break
 	case "r":
-		krpc.Response(message)
+		p.response(message)
 		break
 	}
 	return nil
 }
 
 //Response message
-func (krpc *KRPC) Response(msg *KRPCMessage) {
+func (p *krpc) response(msg *krpcMessage) {
 	countFindResponse++
 	//当table还有空余位置再解析，避免内存浪费
-	if len(krpc.Dht.table.Nodes) <= TableSize &&
-		len(hasFound) <= HasFoundSize {
-		if response, ok := msg.Addion.(*Response); ok {
+	if len(p.dht.table.nodes) <= TableMaxSize && len(finder) <= FinderMaxSize {
+		if response, ok := msg.Addion.(*response); ok {
 			if nodestr, ok := response.R["nodes"].(string); ok {
-				nodes := ParseBytesStream([]byte(nodestr))
+				nodes := parseBytesStream([]byte(nodestr))
 				for _, node := range nodes {
-					if node.Port > 0 && node.Port <= (1<<16) {
-						krpc.Dht.table.Put(node)
+					if node.port > 0 && node.port <= (1<<16) {
+						p.dht.table.put(node)
 					}
 				}
 			}
@@ -111,8 +85,8 @@ func (krpc *KRPC) Response(msg *KRPCMessage) {
 	}
 }
 
-//AnnounceData define data to storage
-type AnnounceData struct {
+//Infohash define data to storage
+type Infohash struct {
 	Infohash       string
 	IP             net.IP
 	Port           int
@@ -120,40 +94,33 @@ type AnnounceData struct {
 	IsAnnouncePeer bool
 }
 
-//Query message
-func (krpc *KRPC) Query(msg *KRPCMessage) {
-	if query, ok := msg.Addion.(*Query); ok {
+func (p *krpc) query(msg *krpcMessage) {
+	if query, ok := msg.Addion.(*query); ok {
 		if query.Y == "get_peers" {
 			countGetPeers++
 			if infohash, ok := query.A["info_hash"].(string); ok {
-				if len(infohash) != 20 {
-					return
-				}
-				if msg.T == "" {
-					return
-				}
-				fromID, ok := query.A["id"].(string)
-				if !ok {
-					return
-				}
-				if len(fromID) != 20 {
+				if len(infohash) != 20 || len(msg.T) == 0 {
 					return
 				}
 
-				result := AnnounceData{}
-				result.Infohash = ID(infohash).String()
-				result.IP = msg.Addr.IP
-				krpc.Dht.outChan <- result
+				if fromID, ok := query.A["id"].(string); !ok {
+					return
+				} else if len(fromID) != 20 {
+					return
+				}
 
-				nodes := ConvertByteStream(krpc.Dht.table.Snodes)
-				data, _ := krpc.EncodingNodeResult(msg.T, "asdf13e", nodes)
-				go krpc.Dht.network.Send(data, msg.Addr)
+				p.dht.out <- Infohash{
+					Infohash: ID(infohash).string(),
+					IP:       msg.Addr.IP}
+
+				nodes := convertByteStream(p.dht.table.fnodes)
+				data, _ := p.encodingNodeResult(msg.T, "asdf13e", nodes)
+				go p.dht.network.send(data, msg.Addr)
 			}
 		}
 		if query.Y == "announce_peer" {
 			if infohash, ok := query.A["info_hash"].(string); ok {
-				token, ok := query.A["token"].(string)
-				if !ok {
+				if token, ok := query.A["token"].(string); !ok {
 					return
 				} else if token != "asdf13e" {
 					return
@@ -174,35 +141,35 @@ func (krpc *KRPC) Query(msg *KRPCMessage) {
 				}
 
 				countAnnounce++
-				result := AnnounceData{}
-				result.Infohash = ID(infohash).String()
-				result.IP = msg.Addr.IP
-				result.Port = port
-				result.ImpliedPort = int(impliedPort)
-				result.IsAnnouncePeer = true
-				krpc.Dht.outChan <- result
+
+				p.dht.out <- Infohash{
+					Infohash:       ID(infohash).string(),
+					IP:             msg.Addr.IP,
+					Port:           port,
+					ImpliedPort:    int(impliedPort),
+					IsAnnouncePeer: true}
 
 				var data []byte
 				if id, ok := query.A["id"].(string); ok {
-					newID := Neightor(id, krpc.Dht.node.ID.String())
-					data, _ = krpc.EncodingNormalResult(msg.T, newID)
+					newID := neightor(id, p.dht.node.id.string())
+					data, _ = p.encodingCommonResult(msg.T, newID)
 				} else {
-					data, _ = krpc.EncodingNormalResult(msg.T, krpc.Dht.node.ID.String())
+					data, _ = p.encodingCommonResult(msg.T, p.dht.node.id.string())
 				}
-				go krpc.Dht.network.Send(data, msg.Addr)
+				go p.dht.network.send(data, msg.Addr)
 			}
 		}
 
 		if query.Y == "ping" {
 			var data []byte
 			if id, ok := query.A["id"].(string); ok && len(id) == 20 {
-				newID := Neightor(id, krpc.Dht.node.ID.String())
-				data, _ = krpc.EncodingNormalResult(msg.T, newID)
+				newID := neightor(id, p.dht.node.id.string())
+				data, _ = p.encodingCommonResult(msg.T, newID)
 			} else {
-				data, _ = krpc.EncodingNormalResult(msg.T, krpc.Dht.node.ID.String())
+				data, _ = p.encodingCommonResult(msg.T, p.dht.node.id.string())
 			}
 			countPing++
-			go krpc.Dht.network.Send(data, msg.Addr)
+			go p.dht.network.send(data, msg.Addr)
 		}
 
 		if query.Y == "find_node" {
@@ -210,15 +177,14 @@ func (krpc *KRPC) Query(msg *KRPCMessage) {
 				return
 			}
 			countFindNode++
-			nodes := ConvertByteStream(krpc.Dht.table.Snodes)
-			data, _ := krpc.EncodingNodeResult(msg.T, "", nodes)
-			go krpc.Dht.network.Send([]byte(data), msg.Addr)
+			nodes := convertByteStream(p.dht.table.fnodes)
+			data, _ := p.encodingNodeResult(msg.T, "", nodes)
+			go p.dht.network.send([]byte(data), msg.Addr)
 		}
 	}
 }
 
-//ConvertByteStream convert node to bytes
-func ConvertByteStream(nodes []*KNode) []byte {
+func convertByteStream(nodes []*node) []byte {
 	buf := bytes.NewBuffer(nil)
 	for _, v := range nodes {
 		convertNodeInfo(buf, v)
@@ -226,9 +192,9 @@ func ConvertByteStream(nodes []*KNode) []byte {
 	return buf.Bytes()
 }
 
-func convertNodeInfo(buf *bytes.Buffer, v *KNode) {
-	buf.Write(v.ID)
-	convertIPPort(buf, v.IP, v.Port)
+func convertNodeInfo(buf *bytes.Buffer, v *node) {
+	buf.Write(v.id)
+	convertIPPort(buf, v.ip, v.port)
 }
 func convertIPPort(buf *bytes.Buffer, ip net.IP, port int) {
 	buf.Write(ip.To4())
@@ -236,53 +202,48 @@ func convertIPPort(buf *bytes.Buffer, ip net.IP, port int) {
 	buf.WriteByte(byte(port & 0xFF))
 }
 
-//ParseBytesStream parse bytes to node
-func ParseBytesStream(data []byte) []*KNode {
-	var nodes []*KNode
+func parseBytesStream(data []byte) []*node {
+	var nodes []*node
 	for j := 0; j < len(data); j = j + 26 {
 		if j+26 > len(data) {
 			break
 		}
-
 		kn := data[j : j+26]
-		node := new(KNode)
-		node.ID = ID(kn[0:20])
-		node.IP = kn[20:24]
+		node := new(node)
+		node.id = ID(kn[0:20])
+		node.ip = kn[20:24]
 		port := kn[24:26]
-		node.Port = int(port[0])<<8 + int(port[1])
+		node.port = int(port[0])<<8 + int(port[1])
 		nodes = append(nodes, node)
 	}
 	return nodes
 }
 
 //KRPCMessage define
-type KRPCMessage struct {
+type krpcMessage struct {
 	T      string
 	Y      string
 	Addion interface{}
 	Addr   *net.UDPAddr
 }
 
-//Query define
-type Query struct {
+type query struct {
 	Y string
 	A map[string]interface{}
 }
 
-//Response define
-type Response struct {
+type response struct {
 	R map[string]interface{}
 }
 
-//EncodingNodeResult message
-func (krpc *KRPC) EncodingNodeResult(tid string, token string, nodes []byte) ([]byte, error) {
+func (p *krpc) encodingNodeResult(tid string, token string, nodes []byte) ([]byte, error) {
 	v := make(map[string]interface{})
 	defer func() { v = nil }()
 	v["t"] = tid
 	v["y"] = "r"
 	args := make(map[string]string)
 	defer func() { args = nil }()
-	args["id"] = string(krpc.Dht.node.ID)
+	args["id"] = string(p.dht.node.id)
 	if token != "" {
 		args["token"] = token
 	}
@@ -291,8 +252,7 @@ func (krpc *KRPC) EncodingNodeResult(tid string, token string, nodes []byte) ([]
 	return bencode.EncodeBytes(v)
 }
 
-//EncodingNormalResult ping
-func (krpc *KRPC) EncodingNormalResult(tid string, id string) ([]byte, error) {
+func (p *krpc) encodingCommonResult(tid string, id string) ([]byte, error) {
 	v := make(map[string]interface{})
 	defer func() { v = nil }()
 	v["t"] = tid
