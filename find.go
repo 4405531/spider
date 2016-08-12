@@ -55,11 +55,7 @@ func (p *dht) find() {
 				logger("Resolve DNS error, %s\n", err)
 				return
 			}
-			node := new(node)
-			node.port = raddr.Port
-			node.ip = raddr.IP
-			node.id = nil
-			p.findNode(val, args, node)
+			p.findNode(val, args, &node{port: raddr.Port, ip: raddr.IP, id: nil})
 		}
 	}
 	val := make(map[string]interface{})
